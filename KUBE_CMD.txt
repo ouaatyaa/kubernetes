@@ -1,0 +1,490 @@
+kubectl get componentstatuses // kubectl get cs
+kubectl get all
+kubectl get namespace  // kubectl get ns
+
+kubectl config view
+kubectl config current-context/use-context
+kubectl describe nodes
+kubectl describe pods nginx...
+kubectl describe service nginx 
+kubectl describe deploy nginx
+kubectl get events 
+kubectl get pods --show-labels
+kubectl get pods -l env=prod
+kubectl get apiservices
+kubectl get cluser-info
+kubectl version --short
+kubectl get storageclass
+
+kubectl  get cs/ev/ns/no/po/ds
+kubectl  get ds -n kube-system      //DeamonSet (nodeAfinity)
+kubectl  exec -ti monpod -c mondebian /bin/bash    // se connecter au contenaier dans le pod
+
+kubectl api-resources -o wide |more     // tres bien pour aficher les truc dial k8s be7al les nodes,les ns,les pod ,les svc ...kolchi
+
+[root@k8snode ~]# kubectl api-versions  |more    <<  hadi kat3tik les version dial api tu en aura besoin dans les fichies yml de config
+admissionregistration.k8s.io/v1
+apiextensions.k8s.io/v1
+apiregistration.k8s.io/v1
+apps/v1
+
+kubectl axplain pod  // equivalent du man par expl : man pod
+
+root@kmaster:~# kubectl  api-resources
+NAME                              SHORTNAMES   APIGROUP                       NAMESPACED   KIND
+bindings                                                                      true         Binding
+componentstatuses                 cs                                          false        ComponentStatus
+configmaps                        cm                                          true         ConfigMap
+endpoints                         ep                                          true         Endpoints
+events                            ev 
+
+-------------------------------------  servies & deployment : scaling kandiro des replica dial les  pods dial chi deployment
+kubectl run monpod --rm  -it --image busybox --command -- sh -c "sleep 600"   //--rm -it  dima hado bjoj
+kubectl exec monpod  -it -- bash
+kubectl create deployment mydeploy --image busybox  --dry-run=client  -o yaml
+kubectl create deployment monnginx --image nginx 
+kubectl create service nodeport monnginx --tcp 8080:80
+kubectl scale deployment monnginx --replicas=2         // les pods dial  monnginx ghadi wiloui deux pods
+kubectl scale deployment monnginx --replicas=1         // pour annuler est revenir un seul pods
+
+kubectl autoscale deployment monnginx --min=2 --max=10  // selon la demande et la charg sur le nginx
+
+kubectl exec -ti monnginx-xxx /bin/bash
+echo "instance 1" > /usr/share/nginx/html/index.html
+
+
+ - autoscaling )....
+
+2 cas à retenir :
+
+requests : minimum par conteneur
+important pour la répartition sur les noeuds (scheduler)
+limits : maximum par pod
+important pour la santé des pods (kubelet)
+ressources : metrics-server (slides suivants)
+
+--------------------------------------// save/apply  config en yaml :-----------------------------------
+
+kubectl  get deploy  monnginx -o yaml >mydeploy.yml
+kubectl  get svc  monnginx -o yaml >mysvc.yml
+cat mydeploy.yml mysvc.yml >myapp.yml    // ajouter la separation avant apiversion par les '---' 
+                                        //pour restaurer le service ila mcha lik ola ila biti tcopih fi custer akhor
+
+------------------------------------------------------------------------------------------------------
+--------------------------- ---------------------  Namespaces & Context :-----------------------------
+kubectl config get-contexts
+kubectl config set-context nsuser1 --namespace nspace1  --user kubernetes-admin --cluster kubernetes
+kubectl config use-context nsuser1  // switch to new context 
+kubectl config view
+kubectl config current-context
+[root@vmansible ~]# kubectl config get-contexts
+CURRENT   NAME                          CLUSTER      AUTHINFO           NAMESPACE
+          kubernetes-admin@kubernetes   kubernetes   kubernetes-admin   
+*         nsuser1                       kubernetes   kubernetes-admin   nspace1
+[root@vmansible ~]# kubectl config use-context kubernetes-admin@kubernetes
+Switched to context "kubernetes-admin@kubernetes".
+[root@vmansible ~]# kubectl config get-contexts
+CURRENT   NAME                          CLUSTER      AUTHINFO           NAMESPACE
+*         kubernetes-admin@kubernetes   kubernetes   kubernetes-admin   
+          nsuser1                       kubernetes   kubernetes-admin   nspace1
+
+
+---------------------------------- label  & selector ------------------------------
+kubectl run monnginx  --image nginx --labels "env=prod,group=front"
+kubectl run monnginx2 --image nginx --labels "env=devel,group=front"
+
+kubectl label pods monnginx2-5d7c66c95d-qj27m --overwrite "group=back"
+kubectl get pods --selector "env=devel" --show-label
+
+kubectl delete pods --all
+
+-----------------------------------------------------------------------------------
+-----------------------------------------NodeSelector------------------------------------------
+1- prparer les nodes:   labelisé les nodes :
+kubectl label node knode1  env=prod
+kubectl get nodes --show-labels
+
+2- editer le fichier deployement pour Ajouter NodeSelector
+
+...
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: Mynginx
+  template:
+    metadata:
+      labels:
+        app: Mynginx
+    spec:
+      containers:
+      - image: nginx
+        name: nginx
+      nodeSelector:            <<<ADD this POD spec NOT the container spec
+         env: prod
+--------------------------------------------PodNodeSelector---------------------------------------        
+--------------------------------------------------------------------------------------------------
+0-  changé la capabilité (disabled par defaut) :
+vim /etc/kubernetes/manifests/kube-apiserver.yaml
+add this PodNodSelector to file :
+- --enable-admission-plugins=NodeRestriction,PodNodSelector
+les pods kube-system  vont redemaré
+1- prpare the node:  labilisé li node :
+kubectl label node knod2  env=prod
+kubectl label node knod1  env=dev
+kubectl get nodes --show-labels
+
+2- Add Annotations to namespaces under metadata:   ****!!!!!
+kubectl edit ns prod
+...
+  annotations:
+    scheduler.alpha.kubernetes.io/node-selector: "env=prod"
+
+3- daba ila deployina chi deployement dans le ns prod ghadi itla7o dans knod2
+     ET ila deployina chi deployement dans le ns dev  ghadi itla7o dans knod1
+
+Modifier ns dans le yaml du deployement ET lancih ou bien lancih manuelement:
+
+1----------------ns prod
+kubectl -n prod run deploy  nginx --image nginx
+
+Every 2.0s: kubectl get all -o wide -n prod                    Sat Aug 27 14:12:41 2022
+
+NAME         READY   STATUS      RESTARTS   AGE   IP              NODE    NOMINATED NOD
+pod/deploy   0/1     Completed   2          32s   10.244.94.132   knod2   <none>
+
+2------------dev
+root@kmaster:~# kubectl -n dev run   nginx --image nginx 
+pod/nginx created
+
+Every 2.0s: kubectl get all -o wide -n dev                     Sat Aug 27 14:15:01 2022
+
+NAME        READY   STATUS    RESTARTS   AGE   IP               NODE    NOMINATED NODE
+pod/nginx   1/1     Running   0          12s   10.244.128.160   knod1   <none>
+
+root@kmaster:~# kubectl get nodes -l env=dev
+NAME    STATUS   ROLES    AGE    VERSION
+knod1   Ready    <none>   2d4h   v1.18.5
+root@kmaster:~# kubectl get nodes -l env=prod
+NAME    STATUS   ROLES    AGE   VERSION
+knod2   Ready    <none>   16h   v1.18.5
+root@kmaster:~# 
+------------------------------------------------------------------------------------------------------
+----------------------------------------DeamonSet Node Affinity-----------------------------------------
+
+Hadi wa7ed la ressource smitha (kind: DaemonSet ) biha tan lanciw sur chaque node un pod ( rien a voir avec replicaset)
+ila zidna liha nodeSelector n9dro nsibliw ghir un ou Plieusieurs nodes :
+-----
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+...
+
+system fih des deamonset khedamin bihom be7al proxy et reseaux flannel ....:
+root@kmaster:~# kubectl get ds -n kube-system
+NAME          DESIRED   CURRENT   READY   UP-TO-DATE   AVAILABLE   NODE SELECTOR            AGE
+calico-node   3         3         3       3            3           kubernetes.io/os=linux   2d4h <<<< 3endi 3 nodes f cluster sur 
+kube-proxy    3         3         3       3            3           kubernetes.io/os=linux   2d15h <<<< chaque node un pod
+root@kmaster:~# 
+kubectl get ds kube-proxy -n kube-system -o yaml |more
+
+-----------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+                               |P|O|D|S|
+--------------------- Example simple pod multi containers:
+apiVersion: v1
+kind: Pod
+metadata:
+  name: monpod
+  # définition du namespace
+  namespace: nspace1 
+  # labels
+  labels:
+    env: prod
+spec:
+  containers:
+  - name: nginx
+    image: nginx
+    ports:
+    - containerPort: 80
+  - name: mondebian
+    image: debian
+    command: ["sleep", "600"]
+
+
+kubectl exec -ti monpod -c mondebian /bin/bash    // se connecter au contenaier dans le pod
+
+    (((((((((((((((((((((((((((((((((((())))))))))))))))))))))))))))))))))))
+-------------------------------------------------------------------------------------------------------
+------------------------------------------------ JOBS -------------------------------------------------------
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+   name: helloworldjob
+spec:
+  completions: 2         >>>>  le job se lansera 2 fois
+  parallelism: 2         <<<< il 3endek comletions 10 et paralelism 2 ghadi ilanci lik 5 dial les pods
+  backofflimit: 2       <<< ila kan kay faild ghadi 3awed 3 dial merrat
+  ttlSecondsAfterFinished: 100  <<< had loption tadir clean up dial les jobs li salaw mé i faut enablé future dans les manifest k8s
+  template:
+    spec:
+      containers:
+      - name: busybox
+        image: busybox
+        command: ["echo", "hello kubernetes !!!"]
+      restartPolicy: Never
+
+----- shouf les action li te9der tdir avec les job homa:
+Default run
+killing and restart pod
+completions    >>> completions: 2
+parallelism
+backofflimit
+activeDeadlineSeconds 
+
+-----------------------------------------------------------------------------------------------------------------
+-------------------------------------------------------Cronjob----------------------------------------------------------
+apiVersion: batch/v1beta1 
+kind: CronJob
+metadata:
+  name: helloworld-cron
+spec:
+  schedule: "* * * * *"      <<< chaque minute il cree un job qui cree un pod
+  suspend: true         <<hna tu peu suspend le cron a true oubien le relance a false apres tu apply le yaml file por appliké  
+  concurrencyPolicy: Forbid  <<< interdir le chavechement des jobs Allow par defaut 
+  jobTemplate:
+     spec:
+       template:
+         spec:
+           containers:
+           - name: busybox
+             image: busybox
+             command: ["echo", "hello kubernetes !!!"]
+           restartPolicy: Never
+---------------------------
+Every 2.0s: kubectl get all                                                                
+
+NAME                                   READY   STATUS      RESTARTS   AGE
+pod/helloworld-cron-1661644980-2xkc9   0/1     Completed   0          2m48s
+
+NAME                                   COMPLETIONS   DURATION   AGE
+job.batch/helloworld-cron-1661644980   1/1           15s        2m48s
+
+NAME                            SCHEDULE    SUSPEND   ACTIVE   LAST SCHEDULE   AGE
+cronjob.batch/helloworld-cron   * * * * *   True      0        2m51s           2m52s
+
+
+-----------------------------------------------------------------------------------------------------------------
+-------------------------------------------------------secret----------------------------------------------------------
+                  <<< secret une ressource li fiha des key:value seront utilisé qlqpart ds nos pods....
+apiVersion: v1
+kind: Secret
+metadata:
+  name: secret-demo
+type: Opaque
+data:
+  username: <base64 encoded value>  <<<<<<<< on mis le code generé par :  echo -n 'username'|base64   
+  password: <base64 encoded value>  <<<<<<<< on mis le code generé par :  echo -n 'MyPassword'|base64   
+
+_______________________________________________________________________________pour les cree avec CMDs
+* il y a des secrets  utilsé par le cluster . "kubectl get secrets"
+kubectl create secret generic Mysecret --from-leteral=usename=admin  --from-leteral=password=hpinvent 
+kubectl create secret generic Mysecret --from-file=./usename.txt  --from-file=./password.txt 
+_______________________________________________________________
+apiVersion: v1
+kind: Pod
+metadata:
+  name: busybox
+spec:
+  containers:
+  - image: busybox
+    name: busybox
+    command: ["/bin/sh"]
+    args: ["-c", "sleep 600"]
+    env:
+    - name: myusername
+      valueFrom:
+        secretKeyRef:
+          name: secret-demo    <<< le nom de la secret ressurce
+          key: username
+----
+
+kubectl exec busybox -it -- sh
+/# env |grep username
+admin
+/#
+
+-----------------
+secret Volume :
+________________
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: busybox
+spec:
+  volumes:
+  - name: secret-volume
+    secret:                     <<< hada 1 volume de type secret
+      secretName: secret-demo   <<< il cree des fichier des parms key:value ds le point de Montage
+  containers:                       defenie dans la secret (fichier username et fichier password avec leur valeur dans chaq fichiers )
+  - image: busybox
+    name: busybox
+    command: ["/bin/sh"]
+    args: ["-c", "sleep 600"]
+    volumeMounts:
+    - name: secret-volume
+      mountPath: /mydata
+
+--------------------------------------------------------------configMap ---------------------------------------
+
+root@kmaster:~# kubectl create configmap myconfigmap1  --from-literal=key1=config1 --from-literal=key2=config2 -o yaml --dry-run=client
+apiVersion: v1
+data:
+  key1: config1
+  key2: config2
+kind: ConfigMap
+metadata:
+  creationTimestamp: null
+  name: myconfigmap1
+root@kmaster:~# 
+root@kmaster:~# kubectl create configmap myconfigmap1  --from-literal=key1=config1 --from-literal=key2=config2 
+configmap/myconfigmap1 created
+root@kmaster:~# kubectl get cm
+NAME           DATA   AGE
+myconfigmap1   2      3s
+root@kmaster:~# 
+root@kmaster:~# cp busybox-hostpath.yml busybox-cm.yml 
+root@kmaster:~# vim busybox-cm.yml 
+
+root@kmaster:~# cat  /vagrant/justmeandopensource/yamls/6-configmap-1.yaml 
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: demo-configmap
+data:
+  channel.name: "justmeandopensource"
+  channel.owner: "Venkat Nagappan"
+
+
+root@kmaster:~# cat  /vagrant/justmeandopensource/yamls/6-pod-configmap-volume.yaml 
+apiVersion: v1
+kind: Pod
+metadata:
+  name: busybox
+spec:
+  volumes:
+  - name: demo
+    configMap:
+      name: demo-configmap
+  containers:
+  - image: busybox
+    name: busybox
+    command: ["/bin/sh"]
+    args: ["-c", "sleep 600"]
+    volumeMounts:
+    - name: demo
+      mountPath: /mydata
+root@kmaster:~# 
+root@kmaster:~# vim busybox-cm.yml 
+root@kmaster:~# kubectl create -f busybox-cm.yml 
+pod/busybox created
+root@kmaster:~# kubectl get all
+NAME          READY   STATUS    RESTARTS   AGE
+pod/busybox   1/1     Running   0          14s
+root@kmaster:~# kubectl exec -it busybox -- sh
+/ # ls /mydata
+key1  key2
+/ # cat /mydata/key1
+/ # cat /mydata/key1;echo
+config1
+/ # cat /mydata/key2;echo
+config2
+/ # 
+/ # exit
+root@kmaster:~# 
+
+----------------------------<<<<<<<<<< use case config Mysql my.cnf  as volume configMap .
+
+immutable secret and configMap are very secure and useful ..
+________________________________________________________________________________________________________________________
+
+----------------------------------------- liveness &  readiness   (supervision des containers des pod) !!! ------------
+
+liveness  = restart automatique
+readiness = remplacement de pods défectueux
+
+les deux sont complémentaires
+
+
+  Warning  Unhealthy  15s (x6 over 100s)   kubelet            Liveness probe failed: cat: can't open '/tmp/healthy': No such file or directory
+  Normal   Killing    15s (x2 over 90s)    kubelet            Container liveness failed liveness probe, will be restarted
+  Normal   Pulling    13s (x3 over 2m43s)  kubelet            Pulling image "busybox"
+  Normal   Created    11s (x3 over 2m40s)  kubelet            Created container liveness
+  Normal   Started    11s (x3 over 2m40s)  kubelet            Started container liveness
+  Normal   Pulled     11s                  kubelet            Successfully pulled image "busybox" in 1.935582698s
+
+___________________________________________________________________________________________________________________
+--------------------------------------------------------------PV//PVC ---------------------------------------------
+1-create pv
+2-create pvc
+3-create pod the use pvc -->pv
+
+ReclaimPolicy:
+1 Retain
+2 Recycle
+3 Delete
+
+Access MOde:
+1ReadWriteOnce
+2ReadWWriteMany
+3ReadOnly
+
+---PV
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: pv-hostpath
+  labels:
+    type: local
+spec:
+  storageClassName: manual        <<<<< meme classe Name
+  capacity:
+    storage: 1Gi
+  accessModes:
+    - ReadWriteOnce               <<< meme access mode
+  hostPath:
+    path: "/kube"
+---PVC
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pvc-hostpath
+spec:
+  storageClassName: manual      <<<<< meme classe Name
+  accessModes:
+    - ReadWriteOnce             <<< meme access mode
+  resources:
+    requests:
+      storage: 100Mi
+
+You can create a PVC based on storage class specifications. If you omit the storage class, it will use the default storage class.
+
+kubectl get storageclass
+
+
+-------------------------------------------------------- CEPH provisioner cephfs & rbd
+https://computingforgeeks.com/ceph-persistent-storage-for-kubernetes-with-cephfs/
+https://www.youtube.com/watch?v=X1FiU-6SwDc&ab_channel=SUSE
+
+-------------------------------------------------------- ADD worker
+
+https://www.youtube.com/watch?v=j3ft8k0HC8s&list=PL34sAs7_26wP009Cl03TZbtRFZ2DMJovl&index=5
+
+------ TODO:
+PV/PVC
+secret (env + sec volume )
+
+Deep dive:
+https://www.youtube.com/watch?v=ONP4kFUDX7o
